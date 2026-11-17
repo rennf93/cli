@@ -2,7 +2,10 @@ package githelper
 
 import (
 	"errors"
+	"fmt"
 	"strings"
+
+	"github.com/entireio/cli/internal/remotehelper/bbpush"
 )
 
 // Options accumulates `option <name> <value>` commands from git and
@@ -38,7 +41,8 @@ func (o *Options) Set(name, value string) string {
 		o.dryRun = value == optionValueTrue
 	case "atomic":
 		o.atomic = value == optionValueTrue
-	case "push-cert":
+	case "pushcert", "push-cert":
+		// git's transport-helper sends "pushcert" (TRANS_OPT_PUSH_CERT).
 		o.pushCert = value
 	case "force-if-includes":
 		o.forceIfIncludes = value == optionValueTrue
@@ -104,6 +108,28 @@ func (o *Options) SendPackArgs() []string {
 		args = append(args, "--force-with-lease="+cas)
 	}
 	return args
+}
+
+// errBBUnsupportedOption names a push option that the client-chunked push
+// does not implement.
+var errBBUnsupportedOption = errors.New("an option needs send-pack")
+
+// bbPushOptions returns the options of a client-chunked push. It fails for
+// a signed push, which only send-pack implements. A push signed "if-asked"
+// stays on the client-chunked path unless the remote asks for a signature.
+// force-if-includes needs nothing here: git checks it before it runs the
+// helper.
+func (o *Options) bbPushOptions() (bbpush.Options, error) {
+	if o.pushCert == optionValueTrue {
+		return bbpush.Options{}, fmt.Errorf("push-cert %s: %w", o.pushCert, errBBUnsupportedOption)
+	}
+	return bbpush.Options{
+		DryRun:          o.dryRun,
+		Atomic:          o.atomic,
+		PushOptions:     o.pushOptions,
+		CAS:             o.cas,
+		PushCertIfAsked: o.pushCert == "if-asked",
+	}, nil
 }
 
 // optionReplyInvalid is remote-curl.c's reply when set_option fails.
